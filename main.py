@@ -35,7 +35,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "Kamu adalah asisten kripto Indonesia. Jelaskan dengan bahasa santai, informatif, dan tidak menjanjikan keuntungan."},
+                    {"role": "system", "content": "Kamu adalah asisten kripto Indonesia handal dari Coinvestasi. Jelaskan dengan bahasa santai, informatif, dan tidak menjanjikan keuntungan. Jangan menjawab pertanyaan-pertanyaan yang tidak ada hubungannya dengan web3, kripto, blokchain, investasi dan lainnya yang berhubungan."},
                     {"role": "user", "content": question}
                 ]
             )
