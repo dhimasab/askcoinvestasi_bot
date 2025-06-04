@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
 
-# Load environment variables from .env file (for local testing)
+# Load environment variables (Replit: via Secrets, lokal: via .env)
 load_dotenv()
 
 # ====== CONFIG ======
@@ -15,11 +15,12 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# ====== KEEP-ALIVE FLASK APP ======
+# ====== KEEP-ALIVE SERVER (UptimeRobot) ======
 app = Flask(__name__)
 
 @app.route('/')
 def home():
+    print("Ping masuk ke /")
     return "Bot is alive!"
 
 def run():
@@ -48,7 +49,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "Kamu adalah asisten kripto Indonesia handal dari Coinvestasi. Jelaskan dengan bahasa santai, informatif, dan tidak menjanjikan keuntungan. Jangan menjawab pertanyaan-pertanyaan yang tidak ada hubungannya dengan web3, kripto, blokchain, investasi dan lainnya yang berhubungan."},
+                    {
+                        "role": "system",
+                        "content": (
+                            "Kamu adalah asisten kripto Indonesia handal dari Coinvestasi. "
+                            "Jelaskan dengan bahasa santai, informatif, dan tidak menjanjikan keuntungan. "
+                            "Jangan menjawab pertanyaan yang tidak ada hubungannya dengan kripto, blockchain, web3, atau investasi digital."
+                        )
+                    },
                     {"role": "user", "content": question}
                 ]
             )
@@ -57,10 +65,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         except Exception as e:
             await message.reply_text("Lagi error, coba lagi nanti ya! 😓")
+            print("OpenAI Error:", e)
 
 # ====== MAIN BOT RUNNER ======
 def main():
-    keep_alive()  # tambahkan ini
+    keep_alive()  # ⬅️ WAJIB: agar URL publik aktif
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Regex(r"^/tanya.*"), handle_message))
