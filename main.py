@@ -3,6 +3,8 @@ from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filte
 import openai
 import os
 from dotenv import load_dotenv
+from flask import Flask
+from threading import Thread
 
 # Load environment variables from .env file (for local testing)
 load_dotenv()
@@ -13,6 +15,20 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
+# ====== KEEP-ALIVE FLASK APP ======
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
 # ====== MESSAGE HANDLER ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
@@ -21,9 +37,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    # Trigger jika ada /tanya atau @mention bot
     if text.startswith("/tanya") or BOT_USERNAME in text:
-        # Bersihkan teks dari trigger
         question = text.replace("/tanya", "").replace(BOT_USERNAME, "").strip()
 
         if not question:
@@ -31,7 +45,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         try:
-            # Kirim pertanyaan ke OpenAI
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
@@ -47,6 +60,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ====== MAIN BOT RUNNER ======
 def main():
+    keep_alive()  # tambahkan ini
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Regex(r"^/tanya.*"), handle_message))
