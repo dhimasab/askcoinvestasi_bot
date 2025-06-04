@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
 
-# Load environment variables (Replit: via Secrets, lokal: via .env)
+# Load environment variables
 load_dotenv()
 
 # ====== CONFIG ======
@@ -15,12 +15,12 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-# ====== KEEP-ALIVE SERVER (UptimeRobot) ======
+# ====== KEEP-ALIVE (Flask server for UptimeRobot) ======
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    print("Ping masuk ke /")
+    print("🔁 Ping masuk ke / — Bot is alive!")
     return "Bot is alive!"
 
 def run():
@@ -40,6 +40,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text.startswith("/tanya") or BOT_USERNAME in text:
         question = text.replace("/tanya", "").replace(BOT_USERNAME, "").strip()
+        print(f"📩 Pertanyaan masuk: {question}")
 
         if not question:
             await message.reply_text("Pertanyaannya mana, bro? 😅")
@@ -47,7 +48,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o",  # ⬅️ Ganti ke GPT-4o
                 messages=[
                     {
                         "role": "system",
@@ -61,18 +62,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             )
             answer = response.choices[0].message.content.strip()
+            print(f"✅ Jawaban OpenAI: {answer}")
             await message.reply_text(answer, reply_to_message_id=message.message_id)
 
         except Exception as e:
+            print("❌ ERROR dari OpenAI:", e)
             await message.reply_text("Lagi error, coba lagi nanti ya! 😓")
-            print("OpenAI Error:", e)
 
 # ====== MAIN BOT RUNNER ======
 def main():
-    keep_alive()  # ⬅️ WAJIB: agar URL publik aktif
+    keep_alive()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Regex(r"^/tanya.*"), handle_message))
+    print("🚀 Bot Coinvestasi siap jalan!")
     app.run_polling()
 
 if __name__ == "__main__":
