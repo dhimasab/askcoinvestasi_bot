@@ -3,7 +3,6 @@ from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filte
 import openai
 import os
 import logging
-from dotenv import load_dotenv
 
 # ====== SETUP LOGGER ======
 logging.basicConfig(
@@ -12,13 +11,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ====== LOAD ENV ======
-load_dotenv()
+# ====== LOAD ENV VARS LANGSUNG ======
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 BOT_USERNAME = "@askcoinvestasi_bot"
 
-openai.api_key = OPENAI_API_KEY
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 # ====== MESSAGE HANDLER ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40,12 +38,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Question parsed: {question}")
 
         try:
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
                     {
                         "role": "system",
-                        "content": "Kamu adalah asisten kripto Indonesia handal dari Coinvestasi. Jelaskan dengan bahasa santai, informatif, dan tidak menjanjikan keuntungan. Jangan menjawab pertanyaan-pertanyaan yang tidak ada hubungannya dengan web3, kripto, blockchain, investasi dan lainnya yang berhubungan."
+                        "content": (
+                            "Kamu adalah asisten kripto Indonesia handal dari Coinvestasi. "
+                            "Jelaskan dengan bahasa santai, informatif, dan tidak menjanjikan keuntungan. "
+                            "Jangan menjawab pertanyaan-pertanyaan yang tidak ada hubungannya dengan web3, kripto, blockchain, "
+                            "investasi dan lainnya yang berhubungan."
+                        )
                     },
                     {"role": "user", "content": question}
                 ]
