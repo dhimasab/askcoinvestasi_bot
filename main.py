@@ -9,20 +9,20 @@ from telegram.ext import (
     Application,
     ApplicationBuilder,
     MessageHandler,
+    CommandHandler,
     ContextTypes,
     ChatMemberHandler,
-    CommandHandler,
     filters,
 )
 import pandas as pd
 import numpy as np
 import openai
 
-# ====== SETUP LOGGER ======
+# ====== LOGGER ======
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ====== ENV VARS ======
+# ====== ENV & API ======
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
@@ -30,7 +30,7 @@ BOT_USERNAME = "@askcoinvestasi_bot"
 BOT_USERNAME_STRIPPED = BOT_USERNAME.replace("@", "")
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# ====== GROUP & USAGE TRACKING ======
+# ====== ALLOWED GROUPS & TRACKING ======
 with open("allowed_groups.json") as f:
     ALLOWED_GROUPS = json.load(f)
 
@@ -65,7 +65,7 @@ async def clear_idle_memory():
             CHAT_LAST_USED.pop(cid, None)
             logger.info(f"🧹 Cleared memory for group {cid}")
 
-# ====== BROWSING ======
+# ====== SERPER BROWSING ======
 def search_serper(query):
     try:
         res = requests.post(
@@ -80,25 +80,17 @@ def search_serper(query):
         logger.warning(f"Serper error: {e}")
         return None
 
-# ====== BINANCE ANALYTICS ======
-def get_binance_ohlcv(symbol="BTCUSDT", interval="1h", limit=100):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    try:
-        res = requests.get(url, timeout=10)
-        res.raise_for_status()
-        data = res.json()
-        if not isinstance(data, list) or len(data) < 30:
-            raise ValueError("Data tidak cukup atau format salah.")
-        df = pd.DataFrame(data, columns=[
-            "time", "open", "high", "low", "close", "volume",
-            "close_time", "quote", "trades", "taker_buy_base", "taker_buy_quote", "ignore"
-        ])
-        df["close"] = df["close"].astype(float)
-        df["volume"] = df["volume"].astype(float)
-        return df
-    except Exception as e:
-        logger.warning(f"❌ Gagal ambil data Binance {symbol}-{interval}: {e}")
-        return None
+# ====== COINGECKO ANALYTICS (DAILY) ======
+def get_daily_data(symbol="bitcoin", days=30):
+    url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=usd&days={days}"
+    r = requests.get(url)
+    if r.status_code != 200:
+        raise ValueError("Failed fetch CoinGecko")
+    data = r.json()
+    df = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
+    df["close"] = df["close"].astype(float)
+    df["volume"] = [v[1] for v in data["total_volumes"]]
+    return df
 
 def analyze(df):
     df["EMA9"] = df["close"].ewm(span=9).mean()
@@ -112,33 +104,42 @@ def analyze(df):
     df["RSI"] = 100 - (100 / (1 + rs))
     df["vol_avg"] = df["volume"].rolling(20).mean()
     df["vol_spike"] = df["volume"] > 1.5 * df["vol_avg"]
-
     last = df.iloc[-1]
+
     trend = "📈 EMA Uptrend" if last["EMA9"] > last["EMA21"] else "📉 EMA Downtrend"
     rsi = f"{last['RSI']:.2f}"
     rsi_state = "🟢 Oversold (RSI<30)" if last["RSI"] < 30 else "🔴 Overbought (RSI>70)" if last["RSI"] > 70 else "⚪️ Netral"
     vol = "📊 Volume Spike" if last["vol_spike"] else "🔕 Volume normal"
     confirm = "✅ Sinyal entry (bullish selaras)" if last["EMA9"] > last["EMA21"] and last["RSI"] < 30 and last["vol_spike"] else "❌ Belum ada sinyal kuat"
-
     return trend, f"RSI {rsi} → {rsi_state}", vol, confirm
+
+SYMBOL_MAP = {
+    "BTCUSDT": "bitcoin",
+    "ETHUSDT": "ethereum",
+    "SOLUSDT": "solana",
+    "BNBUSDT": "binancecoin",
+    "DOGEUSDT": "dogecoin",
+}
 
 async def analisa_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         args = context.args
-        if len(args) != 2:
-            await update.message.reply_text("Contoh: /analisa BTCUSDT 1h")
+        if len(args) != 1:
+            await update.message.reply_text("Contoh: /analisa BTCUSDT")
             return
-        symbol, tf = args[0].upper(), args[1]
-        df = get_binance_ohlcv(symbol, tf)
-        if df is None:
-            await update.message.reply_text("⚠️ Analisa gagal. Coba pair & timeframe lain ya.")
+        symbol = args[0].upper()
+        cg_id = SYMBOL_MAP.get(symbol)
+        if not cg_id:
+            await update.message.reply_text("Pair tidak dikenali. Contoh yang didukung: BTCUSDT, ETHUSDT")
             return
+
+        df = get_daily_data(cg_id)
         trend, rsi, vol, confirm = analyze(df)
-        msg = f"📊 Analisa {symbol} ({tf})\n\n{trend}\n{rsi}\n{vol}\n\n{confirm}"
+        msg = f"📊 Analisa {symbol} (daily)\n\n{trend}\n{rsi}\n{vol}\n\n{confirm}"
         await update.message.reply_text(msg, reply_to_message_id=update.message.message_id)
     except Exception as e:
         logger.exception("Analisa gagal:")
-        await update.message.reply_text("⚠️ Analisa gagal. Coba pair & timeframe lain ya.")
+        await update.message.reply_text("⚠️ Analisa gagal. Coba lagi nanti ya.")
 
 # ====== BOT MASUK GRUP ======
 async def handle_bot_added(update: ChatMemberUpdated, context: ContextTypes.DEFAULT_TYPE):
