@@ -83,10 +83,26 @@ def search_serper(query):
 # ====== COINGECKO ANALYTICS (DAILY) ======
 def get_daily_data(symbol="bitcoin", days=30):
     url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=usd&days={days}"
+    print(f"🔍 Fetching data from: {url}")
+    
     r = requests.get(url)
+    print(f"🔧 Status code: {r.status_code}")
+
     if r.status_code != 200:
         raise ValueError("Failed fetch CoinGecko")
-    data = r.json()
+
+    try:
+        data = r.json()
+        print(f"📦 Data keys: {list(data.keys())}")
+        print(f"📊 Prices sample: {data['prices'][:2]}")
+        print(f"📊 Volumes sample: {data['total_volumes'][:2]}")
+    except Exception as e:
+        print(f"❌ JSON decode error: {e}")
+        raise
+
+    if "prices" not in data or "total_volumes" not in data:
+        raise ValueError("Data prices/volumes tidak tersedia")
+
     df = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
     df["close"] = df["close"].astype(float)
     df["volume"] = [v[1] for v in data["total_volumes"]]
