@@ -46,15 +46,6 @@ def save_usage(data):
 
 usage_counter = load_usage()
 
-TRIGGER_KEYWORDS = [
-    "jawab pertanyaan ini", "respon dong", "jawab dong", "responin dong",
-    "tolong dijawab", "jawab ini dong", "tolong dijawab ya", "responin deh",
-    "coba dijawab", "tolong dong", "minta jawabannya", "bisa bantu jawab?",
-    "bantuin jawab ini dong", "ayo jawab", "please", "respon chat di atas",
-    "jawab pertanyaan sebelumnya", "jawab chat sebelumnya", "tanggapi dong",
-    "jawab"
-]
-
 # ====== BROWSING FUNCTION ======
 def search_serper(query):
     url = "https://google.serper.dev/search"
@@ -77,7 +68,7 @@ async def handle_bot_added(update: ChatMemberUpdated, context: ContextTypes.DEFA
     if update.my_chat_member.new_chat_member.status in ['member', 'administrator']:
         chat = update.chat
         if chat.type in ["group", "supergroup"]:
-            logger.info(f"\U00002705 Bot ditambahkan ke grup baru: {chat.title or 'Unknown'} (ID: {chat.id})")
+            logger.info(f"✅ Bot ditambahkan ke grup baru: {chat.title or 'Unknown'} (ID: {chat.id})")
 
 # ====== MESSAGE HANDLER ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,86 +84,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Pesan masuk dari: {group_name} (ID: {group_id})")
 
     if chat.type in ["group", "supergroup"] and group_id not in ALLOWED_GROUPS:
-        logger.warning(f"\u274C Grup tidak diizinkan: {group_name} ({group_id})")
-        await message.reply_text("Bot ini belum diaktifkan untuk grup ini \U0001F6AB")
+        logger.warning(f"❌ Grup tidak diizinkan: {group_name} ({group_id})")
+        await message.reply_text("Bot ini belum diaktifkan untuk grup ini 🚫")
         return
 
     is_command = text.startswith("/tanya")
     is_mention = BOT_USERNAME in text
-    is_trigger_phrase = any(kw in text.lower() for kw in TRIGGER_KEYWORDS)
     is_reply = message.reply_to_message and message.reply_to_message.from_user.username == BOT_USERNAME_STRIPPED
 
-    should_respond = is_command or is_mention or (is_reply and is_trigger_phrase) or (is_reply and BOT_USERNAME in text)
-
-    if not should_respond:
-        return
-
-    if is_command or is_mention:
+    if is_command or is_mention or is_reply:
         question = text.replace("/tanya", "").replace(BOT_USERNAME, "").strip()
-    elif is_reply:
-        if is_trigger_phrase or BOT_USERNAME in text:
-            question = message.reply_to_message.text.strip()
-        else:
+
+        if not question:
+            await message.reply_text("Pertanyaannya mana, bro? 😅")
             return
-    else:
-        return
 
-    if not question:
-        await message.reply_text("Pertanyaannya mana, bro? \U0001F605")
-        return
+        logger.info(f"Question parsed: {question}")
+        usage_count = usage_counter.get(group_id, 0)
 
-    logger.info(f"Question parsed: {question}")
-    usage_count = usage_counter.get(group_id, 0)
+        if usage_count >= 100:
+            logger.info(f"⛔ Limit tercapai untuk grup: {group_name} ({group_id})")
+            await message.reply_text("Limit pertanyaan untuk grup ini sudah habis 🚫")
+            return
 
-    if usage_count >= 100:
-        logger.info(f"\u26D4 Limit tercapai untuk grup: {group_name} ({group_id})")
-        await message.reply_text("Limit pertanyaan untuk grup ini sudah habis \U0001F6AB")
-        return
+        browsing_needed = any(keyword in question.lower() for keyword in ["hari ini", "terbaru", "2025", "minggu ini", "kenapa", "harga", "pump", "crash"])
+        browsing_context = search_serper(question) if browsing_needed else None
 
-    browsing_needed = any(keyword in question.lower() for keyword in [
-        "hari ini", "terbaru", "2025", "minggu ini", "kenapa", "harga", "pump", "crash"
-    ])
-    browsing_context = search_serper(question) if browsing_needed else None
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Kamu adalah asisten kripto Indonesia dari Coinvestasi. Gunakan gaya bahasa yang santai, tidak menjanjikan keuntungan, dan edukatif. "
+                        "Jawab pendek, relevan, dan fokus ke topik kripto & Web3. Jika user menanyakan info umum atau data waktu nyata, prioritaskan hasil pencarian web."
+                    )
+                }
+            ]
 
-    try:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Kamu adalah asisten kripto Indonesia dari Coinvestasi. Gunakan gaya bahasa yang santai, tidak menjanjikan keuntungan, dan edukatif. "
-                    "Jawab pendek, relevan, dan fokus ke topik kripto & Web3. Jika user menanyakan info umum atau data waktu nyata, prioritaskan hasil pencarian web."
-                )
-            }
-        ]
+            if browsing_needed and browsing_context:
+                messages.append({
+                    "role": "system",
+                    "content": f"Berikut hasil pencarian web terkini:\n{browsing_context}"
+                })
+            elif browsing_needed and not browsing_context:
+                messages.append({
+                    "role": "system",
+                    "content": "Tidak ada hasil pencarian web tersedia, jawab dengan info umum yang masuk akal."
+                })
 
-        if browsing_needed and browsing_context:
-            messages.append({
-                "role": "system",
-                "content": f"Berikut hasil pencarian web terkini:\n{browsing_context}"
-            })
-        elif browsing_needed and not browsing_context:
-            messages.append({
-                "role": "system",
-                "content": "Tidak ada hasil pencarian web tersedia, jawab dengan info umum yang masuk akal."
-            })
+            messages.append({"role": "user", "content": question})
 
-        messages.append({"role": "user", "content": question})
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages
+            )
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages
-        )
+            answer = response.choices[0].message.content.strip()
+            logger.info(f"OpenAI response: {answer}")
+            await message.reply_text(answer, reply_to_message_id=message.message_id)
 
-        answer = response.choices[0].message.content.strip()
-        logger.info(f"OpenAI response: {answer}")
-        await message.reply_text(answer, reply_to_message_id=message.message_id)
+            usage_counter[group_id] = usage_count + 1
+            save_usage(usage_counter)
 
-        usage_counter[group_id] = usage_count + 1
-        save_usage(usage_counter)
-
-    except Exception as e:
-        logger.exception("Terjadi error saat memanggil OpenAI API:")
-        await message.reply_text("Lagi error, coba lagi nanti ya! \U0001F613")
+        except Exception as e:
+            logger.exception("Terjadi error saat memanggil OpenAI API:")
+            await message.reply_text("Lagi error, coba lagi nanti ya! 😓")
 
 # ====== MAIN ======
 def main():
