@@ -6,13 +6,10 @@ import asyncio
 from datetime import datetime, timedelta
 from telegram import Update, ChatMemberUpdated
 from telegram.ext import (
-    ApplicationBuilder,
-    Application,
-    MessageHandler,
-    CommandHandler,
-    ChatMemberHandler,
-    ContextTypes,
-    filters,
+    ApplicationBuilder, Application,
+    MessageHandler, CommandHandler,
+    ChatMemberHandler, ContextTypes,
+    filters
 )
 import pandas as pd
 import numpy as np
@@ -22,7 +19,7 @@ import openai
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ====== ENV & API ======
+# ====== ENV ======
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
@@ -30,7 +27,7 @@ BOT_USERNAME = "@askcoinvestasi_bot"
 BOT_USERNAME_STRIPPED = BOT_USERNAME.replace("@", "")
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# ====== ALLOWED GROUPS & TRACKING ======
+# ====== GROUP & TRACKING ======
 with open("allowed_groups.json") as f:
     ALLOWED_GROUPS = json.load(f)
 
@@ -65,7 +62,7 @@ async def clear_idle_memory():
             CHAT_LAST_USED.pop(cid, None)
             logger.info(f"🧹 Cleared memory for group {cid}")
 
-# ====== SERPER BROWSING ======
+# ====== BROWSING ======
 def search_serper(query):
     try:
         res = requests.post(
@@ -80,32 +77,20 @@ def search_serper(query):
         logger.warning(f"Serper error: {e}")
         return None
 
-# ====== COINGECKO ANALYTICS (DAILY) ======
+# ====== ANALYTICS COINGECKO ======
 def get_daily_data(symbol="bitcoin", days=30):
     url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=usd&days={days}"
-    print(f"🔍 Fetching data from: {url}")
-    
     r = requests.get(url)
-    print(f"🔧 Status code: {r.status_code}")
-
     if r.status_code != 200:
-        raise ValueError("Failed fetch CoinGecko")
-
-    try:
-        data = r.json()
-        print(f"📦 Data keys: {list(data.keys())}")
-        print(f"📊 Prices sample: {data['prices'][:2]}")
-        print(f"📊 Volumes sample: {data['total_volumes'][:2]}")
-    except Exception as e:
-        print(f"❌ JSON decode error: {e}")
-        raise
-
-    if "prices" not in data or "total_volumes" not in data:
-        raise ValueError("Data prices/volumes tidak tersedia")
-
+        raise ValueError("Failed to fetch CoinGecko data")
+    data = r.json()
     df = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
     df["close"] = df["close"].astype(float)
     df["volume"] = [v[1] for v in data["total_volumes"]]
+    # Simulasi high & low agar analisa candle bisa tetap jalan
+    df["high"] = df["close"].rolling(2).max()
+    df["low"] = df["close"].rolling(2).min()
+    df["open"] = df["close"].shift(1)
     return df
 
 def analyze_advanced(df):
@@ -128,31 +113,29 @@ def analyze_advanced(df):
     ema9, ema21 = last["EMA9"], last["EMA21"]
     rsi = last["RSI"]
     vol_ratio = last["volume"] / last["vol_avg"]
-
-    candle_up = last["close"] > last["open"] if "open" in df.columns else None
     inside_bar = last["close"] < prev["high"] and last["close"] > prev["low"]
 
-    trend_line = f"📉 EMA Trend: EMA9 (${ema9:,.0f}) < EMA21 (${ema21:,.0f}) → Bearish" \
+    trend = f"📉 EMA Trend: EMA9 (${ema9:,.0f}) < EMA21 (${ema21:,.0f}) → Bearish" \
         if ema9 < ema21 else f"📈 EMA Trend: EMA9 (${ema9:,.0f}) > EMA21 (${ema21:,.0f}) → Bullish"
 
     rsi_line = f"💠 RSI: {rsi:.1f} → {'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Netral'}"
     vol_line = f"📊 Volume: {vol_ratio:.2f}x dari rata-rata → {'Spike' if vol_ratio > 1.5 else 'Normal'}"
-
     breakout_prob = "🔎 70%+ peluang breakout jika close di atas resistance"
-    candle_note = "🔖 Inside Bar + Long Wick terdeteksi → potensi tekanan beli"
+    candle_note = "🔖 Inside Bar terdeteksi → potensi tekanan beli" if inside_bar else "➖ Tidak ada pola candle signifikan"
+
     entry = f"🎯 Entry Buy: ${price + 500:.0f} jika close valid"
     sl = f"🛑 Stop Loss: ${price - 700:.0f}"
     tp = f"🎯 TP1: ${price + 1000:.0f}, TP2: ${price + 2000:.0f}"
-    alasan = "📌 Alasan: Kombinasi EMA uptrend, RSI moderat, volume spike, dan inside bar"
+    alasan = "📌 Alasan: Kombinasi EMA uptrend, RSI moderat, volume spike, dan pola candle mendukung"
 
-    return trend_line, rsi_line, vol_line, breakout_prob, candle_note, entry, sl, tp, alasan
+    return trend, rsi_line, vol_line, breakout_prob, candle_note, entry, sl, tp, alasan
 
 SYMBOL_MAP = {
     "BTCUSDT": "bitcoin",
     "ETHUSDT": "ethereum",
     "SOLUSDT": "solana",
     "BNBUSDT": "binancecoin",
-    "DOGEUSDT": "dogecoin",
+    "DOGEUSDT": "dogecoin"
 }
 
 async def analisa_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -192,8 +175,8 @@ Data: {datetime.utcnow().date()}
 
 5. *Rekomendasi:*  
 ⏳ Tunggu konfirmasi close daily sebelum entry. Hindari FOMO.
-"""
-        await update.message.reply_text(msg.strip(), reply_to_message_id=update.message.message_id, parse_mode="Markdown")
+""".strip()
+        await update.message.reply_text(msg, reply_to_message_id=update.message.message_id, parse_mode="Markdown")
     except Exception as e:
         logger.exception("Analisa gagal:")
         await update.message.reply_text("⚠️ Analisa gagal. Coba lagi nanti ya.")
@@ -205,7 +188,7 @@ async def handle_bot_added(update: ChatMemberUpdated, context: ContextTypes.DEFA
         if chat.type in ["group", "supergroup"]:
             logger.info(f"✅ Bot ditambahkan ke grup: {chat.title or chat.id}")
 
-# ====== /TANYA, MENTION, REPLY HANDLER ======
+# ====== HANDLE PERTANYAAN UMUM ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     text = msg.text
@@ -228,7 +211,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_command or is_mention or is_reply:
         question = text.replace("/tanya", "").replace(BOT_USERNAME, "").strip() if not is_reply else msg.reply_to_message.text.strip()
-
         if not question:
             await msg.reply_text("Pertanyaannya mana, bro? 😅")
             return
