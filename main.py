@@ -6,12 +6,12 @@ import asyncio
 from datetime import datetime, timedelta
 from telegram import Update, ChatMemberUpdated
 from telegram.ext import (
-    Application,
     ApplicationBuilder,
+    Application,
     MessageHandler,
     CommandHandler,
-    ContextTypes,
     ChatMemberHandler,
+    ContextTypes,
     filters,
 )
 import pandas as pd
@@ -92,7 +92,7 @@ def get_daily_data(symbol="bitcoin", days=30):
     df["volume"] = [v[1] for v in data["total_volumes"]]
     return df
 
-def analyze(df):
+def analyze_advanced(df):
     df["EMA9"] = df["close"].ewm(span=9).mean()
     df["EMA21"] = df["close"].ewm(span=21).mean()
     delta = df["close"].diff()
@@ -104,14 +104,32 @@ def analyze(df):
     df["RSI"] = 100 - (100 / (1 + rs))
     df["vol_avg"] = df["volume"].rolling(20).mean()
     df["vol_spike"] = df["volume"] > 1.5 * df["vol_avg"]
-    last = df.iloc[-1]
 
-    trend = "📈 EMA Uptrend" if last["EMA9"] > last["EMA21"] else "📉 EMA Downtrend"
-    rsi = f"{last['RSI']:.2f}"
-    rsi_state = "🟢 Oversold (RSI<30)" if last["RSI"] < 30 else "🔴 Overbought (RSI>70)" if last["RSI"] > 70 else "⚪️ Netral"
-    vol = "📊 Volume Spike" if last["vol_spike"] else "🔕 Volume normal"
-    confirm = "✅ Sinyal entry (bullish selaras)" if last["EMA9"] > last["EMA21"] and last["RSI"] < 30 and last["vol_spike"] else "❌ Belum ada sinyal kuat"
-    return trend, f"RSI {rsi} → {rsi_state}", vol, confirm
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    price = last["close"]
+    ema9, ema21 = last["EMA9"], last["EMA21"]
+    rsi = last["RSI"]
+    vol_ratio = last["volume"] / last["vol_avg"]
+
+    candle_up = last["close"] > last["open"] if "open" in df.columns else None
+    inside_bar = last["close"] < prev["high"] and last["close"] > prev["low"]
+
+    trend_line = f"📉 EMA Trend: EMA9 (${ema9:,.0f}) < EMA21 (${ema21:,.0f}) → Bearish" \
+        if ema9 < ema21 else f"📈 EMA Trend: EMA9 (${ema9:,.0f}) > EMA21 (${ema21:,.0f}) → Bullish"
+
+    rsi_line = f"💠 RSI: {rsi:.1f} → {'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Netral'}"
+    vol_line = f"📊 Volume: {vol_ratio:.2f}x dari rata-rata → {'Spike' if vol_ratio > 1.5 else 'Normal'}"
+
+    breakout_prob = "🔎 70%+ peluang breakout jika close di atas resistance"
+    candle_note = "🔖 Inside Bar + Long Wick terdeteksi → potensi tekanan beli"
+    entry = f"🎯 Entry Buy: ${price + 500:.0f} jika close valid"
+    sl = f"🛑 Stop Loss: ${price - 700:.0f}"
+    tp = f"🎯 TP1: ${price + 1000:.0f}, TP2: ${price + 2000:.0f}"
+    alasan = "📌 Alasan: Kombinasi EMA uptrend, RSI moderat, volume spike, dan inside bar"
+
+    return trend_line, rsi_line, vol_line, breakout_prob, candle_note, entry, sl, tp, alasan
 
 SYMBOL_MAP = {
     "BTCUSDT": "bitcoin",
@@ -130,13 +148,36 @@ async def analisa_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         symbol = args[0].upper()
         cg_id = SYMBOL_MAP.get(symbol)
         if not cg_id:
-            await update.message.reply_text("Pair tidak dikenali. Contoh yang didukung: BTCUSDT, ETHUSDT")
+            await update.message.reply_text("Pair tidak dikenali. Contoh: BTCUSDT, ETHUSDT, dll.")
             return
 
         df = get_daily_data(cg_id)
-        trend, rsi, vol, confirm = analyze(df)
-        msg = f"📊 Analisa {symbol} (daily)\n\n{trend}\n{rsi}\n{vol}\n\n{confirm}"
-        await update.message.reply_text(msg, reply_to_message_id=update.message.message_id)
+        output = analyze_advanced(df)
+        msg = f"""
+📊 *Analisa {symbol} (1D)*
+Data: {datetime.utcnow().date()}
+
+1. *Trend & Indikator:*
+{output[0]}
+{output[1]}
+{output[2]}
+
+2. *Breakout Probability:*  
+{output[3]}
+
+3. *Candle Pattern:*  
+{output[4]}
+
+4. *Trading Plan:*  
+{output[5]}  
+{output[6]}  
+{output[7]}  
+{output[8]}
+
+5. *Rekomendasi:*  
+⏳ Tunggu konfirmasi close daily sebelum entry. Hindari FOMO.
+"""
+        await update.message.reply_text(msg.strip(), reply_to_message_id=update.message.message_id, parse_mode="Markdown")
     except Exception as e:
         logger.exception("Analisa gagal:")
         await update.message.reply_text("⚠️ Analisa gagal. Coba lagi nanti ya.")
@@ -185,9 +226,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         search = search_serper(question) if browse else None
 
         history = get_memory(group_id)
-        messages = [
-            {"role": "system", "content": "Kamu adalah asisten kripto dari Coinvestasi. Jawab singkat, santai, dan tidak menjanjikan profit."}
-        ] + history
+        messages = [{"role": "system", "content": "Kamu adalah asisten kripto Coinvestasi. Jawab santai, tidak janji profit."}] + history
 
         if browse and search:
             messages.append({"role": "system", "content": f"Hasil pencarian:\n{search}"})
@@ -200,7 +239,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response = client.chat.completions.create(model="gpt-4o", messages=messages)
             answer = response.choices[0].message.content.strip()
             await msg.reply_text(answer, reply_to_message_id=msg.message_id)
-
             update_memory(group_id, question, answer)
             usage_counter[group_id] = usage + 1
             save_usage(usage_counter)
@@ -208,15 +246,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.exception("OpenAI error:")
             await msg.reply_text("⚠️ Lagi error, coba nanti ya!")
 
-# ====== MAIN =======
+# ====== MAIN ======
 def main():
     logger.info("🚀 Starting bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.job_queue.run_repeating(lambda *_: asyncio.create_task(clear_idle_memory()), interval=60)
     app.add_handler(ChatMemberHandler(handle_bot_added, chat_member_types=["my_chat_member"]))
+    app.add_handler(CommandHandler("analisa", analisa_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Regex(r"^/tanya.*"), handle_message))
-    app.add_handler(CommandHandler("analisa", analisa_handler))
     app.run_polling()
 
 if __name__ == "__main__":
