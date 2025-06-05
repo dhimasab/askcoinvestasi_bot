@@ -10,6 +10,7 @@ import openai
 import os
 import json
 import logging
+import requests
 
 # ====== SETUP LOGGER ======
 logging.basicConfig(
@@ -18,42 +19,55 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ====== LOAD ENV VARS ======
+# ====== ENV VARS ======
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 BOT_USERNAME = "@askcoinvestasi_bot"
+SERPER_API_KEY = os.getenv("SERPER_API_KEY") or "8e28cf714810f94847d29700c9e3be11c2d1186d"
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# ====== LOAD ALLOWED GROUPS ======
+# ====== ALLOWED GROUPS ======
 with open("allowed_groups.json") as f:
     ALLOWED_GROUPS = json.load(f)
 
-# ====== LOAD USAGE TRACKING ======
 USAGE_FILE = "group_usage.json"
 
 def load_usage():
     if os.path.exists(USAGE_FILE):
         with open(USAGE_FILE) as f:
             return json.load(f)
-    else:
-        return {}
+    return {}
 
-def save_usage(usage_data):
+def save_usage(data):
     with open(USAGE_FILE, "w") as f:
-        json.dump(usage_data, f)
+        json.dump(data, f)
 
 usage_counter = load_usage()
 
-# ====== DETEKSI SAAT DITAMBAHKAN KE GRUP ======
+# ====== BROWSING FUNCTION ======
+def search_serper(query):
+    url = "https://google.serper.dev/search"
+    headers = {"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"}
+    data = {"q": query}
+    try:
+        res = requests.post(url, headers=headers, json=data)
+        res.raise_for_status()
+        results = res.json()
+        snippets = []
+        for item in results.get("organic", [])[:3]:
+            snippets.append(f"- {item.get('title')}: {item.get('snippet')}")
+        return "\n".join(snippets)
+    except Exception as e:
+        logger.warning(f"Browsing error: {e}")
+        return None
+
+# ====== DETECT BOT ADDED TO GROUP ======
 async def handle_bot_added(update: ChatMemberUpdated, context: ContextTypes.DEFAULT_TYPE):
-    new_status = update.my_chat_member.new_chat_member.status
-    if new_status in ['member', 'administrator']:
+    if update.my_chat_member.new_chat_member.status in ['member', 'administrator']:
         chat = update.chat
         if chat.type in ["group", "supergroup"]:
-            group_id = str(chat.id)
-            group_name = chat.title or "Unknown Group"
-            logger.info(f"✅ Bot ditambahkan ke grup baru: {group_name} (ID: {group_id})")
+            logger.info(f"✅ Bot ditambahkan ke grup baru: {chat.title or 'Unknown'} (ID: {chat.id})")
 
 # ====== MESSAGE HANDLER ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -68,7 +82,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     group_name = chat.title if chat.type in ["group", "supergroup"] else "Private Chat"
     logger.info(f"Pesan masuk dari: {group_name} (ID: {group_id})")
 
-    # Tolak jika bukan grup yang diizinkan
     if chat.type in ["group", "supergroup"] and group_id not in ALLOWED_GROUPS:
         logger.warning(f"❌ Grup tidak diizinkan: {group_name} ({group_id})")
         await message.reply_text("Bot ini belum diaktifkan untuk grup ini 🚫")
@@ -82,29 +95,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         logger.info(f"Question parsed: {question}")
-
         usage_count = usage_counter.get(group_id, 0)
+
         if usage_count >= 100:
             logger.info(f"⛔ Limit tercapai untuk grup: {group_name} ({group_id})")
             await message.reply_text("Limit pertanyaan untuk grup ini sudah habis 🚫")
             return
 
+        # Trigger browsing jika mengandung kata kunci waktu
+        browsing_needed = any(keyword in question.lower() for keyword in ["hari ini", "terbaru", "2025", "minggu ini", "kenapa", "harga bitcoin"])
+        browsing_context = search_serper(question) if browsing_needed else None
+
         try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Kamu adalah asisten kripto Indonesia dari Coinvestasi. Gunakan gaya bahasa yang santai, tidak menjanjikan keuntungan, dan edukatif."
+                        " Jawab dengan pendek, relevan, dan tidak keluar topik seputar kripto dan Web3."
+                    )
+                }
+            ]
+
+            if browsing_context:
+                messages.append({"role": "system", "content": f"Berikut hasil pencarian web terkini:\n{browsing_context}"})
+
+            messages.append({"role": "user", "content": question})
+
             response = client.chat.completions.create(
                 model="gpt-4o",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Kamu adalah asisten kripto cerdas dari Coinvestasi. Tugasmu adalah menjawab semua pertanyaan "
-                            "seputar kripto, blockchain, aset digital, investasi, dan berita teknologi keuangan dengan bahasa santai, "
-                            "informatif, dan jelas. Jika pertanyaan tidak sepenuhnya relevan, tetap jawab dengan ramah dan arahkan "
-                            "topik kembali ke kripto atau investasi. Hindari memberi janji keuntungan."
-                        )
-                    },
-                    {"role": "user", "content": question}
-                ]
+                messages=messages
             )
+
             answer = response.choices[0].message.content.strip()
             logger.info(f"OpenAI response: {answer}")
             await message.reply_text(answer, reply_to_message_id=message.message_id)
@@ -116,7 +138,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.exception("Terjadi error saat memanggil OpenAI API:")
             await message.reply_text("Lagi error, coba lagi nanti ya! 😓")
 
-# ====== MAIN FUNCTION ======
+# ====== MAIN ======
 def main():
     logger.info("Starting bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
