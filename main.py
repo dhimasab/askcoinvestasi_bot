@@ -62,7 +62,9 @@ async def clear_idle_memory():
             CHAT_LAST_USED.pop(cid, None)
             logger.info(f"🧹 Cleared memory for group {cid}")
 
-# ====== SERPER SEARCH ======
+def format_price(value: float) -> str:
+    return f"${value:,.8f}" if value < 1 else f"${value:,.0f}"
+
 def search_serper(query):
     try:
         res = requests.post(
@@ -77,7 +79,6 @@ def search_serper(query):
         logger.warning(f"Serper error: {e}")
         return None
 
-# ====== ANALISA COINGECKO ======
 def get_daily_data(symbol="bitcoin", days=30):
     url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=usd&days={days}"
     r = requests.get(url)
@@ -114,8 +115,8 @@ def analyze_advanced(df):
     vol_ratio = last["volume"] / last["vol_avg"]
     inside_bar = last["close"] < prev["high"] and last["close"] > prev["low"]
 
-    trend = f"📉 EMA Trend: EMA9 (${ema9:,.0f}) < EMA21 (${ema21:,.0f}) → Bearish" \
-        if ema9 < ema21 else f"📈 EMA Trend: EMA9 (${ema9:,.0f}) > EMA21 (${ema21:,.0f}) → Bullish"
+    trend = f"📉 EMA Trend: EMA9 ({format_price(ema9)}) < EMA21 ({format_price(ema21)}) → Bearish" \
+        if ema9 < ema21 else f"📈 EMA Trend: EMA9 ({format_price(ema9)}) > EMA21 ({format_price(ema21)}) → Bullish"
     rsi_line = f"💠 RSI: {rsi:.1f} → {'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Netral'}"
     vol_line = f"📊 Volume: {vol_ratio:.2f}x dari rata-rata → {'Spike' if vol_ratio > 1.5 else 'Normal'}"
     breakout_prob = "🔎 70%+ peluang breakout jika close di atas resistance"
@@ -124,33 +125,21 @@ def analyze_advanced(df):
     support = df["low"].rolling(5).min().iloc[-1]
     resistance = df["high"].rolling(5).max().iloc[-1]
 
-    entry = f"🎯 Entry Buy: ${resistance:.0f} jika close valid"
-    sl = f"🛑 Stop Loss: ${support:.0f}"
-    tp1 = f"${resistance * 1.03:.0f}"
-    tp2 = f"${resistance * 1.05:.0f}"
+    entry = f"🎯 Entry Buy: {format_price(resistance)} jika close valid"
+    sl = f"🛑 Stop Loss: {format_price(support)}"
+    tp1 = format_price(resistance * 1.03)
+    tp2 = format_price(resistance * 1.05)
     tp = f"🎯 TP1: {tp1}, TP2: {tp2}"
     alasan = "📌 Alasan: Kombinasi EMA uptrend, RSI moderat, volume spike, dan pola candle mendukung"
 
     return price, trend, rsi_line, vol_line, breakout_prob, candle_note, entry, sl, tp, alasan
 
-# ====== SYMBOL MAP DYNAMIC ======
 def fetch_symbol_map():
     try:
         res = requests.get("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100")
         data = res.json()
         return {f"{item['symbol'].upper()}USDT": item['id'] for item in data}
-    except:
-        return {
-            "BTCUSDT": "bitcoin",
-            "ETHUSDT": "ethereum",
-            "SOLUSDT": "solana",
-            "BNBUSDT": "binancecoin",
-            "DOGEUSDT": "dogecoin"
-        }
-
-SYMBOL_MAP = fetch_symbol_map()
-
-# ====== HANDLER ANALISA ======
+    except:# ====== HANDLER ANALISA ======
 async def analisa_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         args = context.args
@@ -169,7 +158,7 @@ async def analisa_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🌟 *Analisa {symbol} (1D)*
 Data: {datetime.utcnow().date()}
 
-⬆️ Harga sekarang: ${price:,.0f}
+⬆️ Harga sekarang: {format_price(price)}
 
 1. *Trend & Indikator:*
 {trend}
@@ -271,3 +260,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+        return {
+            "BTCUSDT": "bitcoin",
+            "ETHUSDT": "ethereum",
+            "SOLUSDT": "solana",
+            "BNBUSDT": "binancecoin",
+            "DOGEUSDT": "dogecoin"
+        }
+
+SYMBOL_MAP = fetch_symbol_map()
+
