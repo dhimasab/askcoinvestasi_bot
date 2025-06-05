@@ -62,7 +62,7 @@ def search_serper(query):
         logger.warning(f"Browsing error: {e}")
         return None
 
-# ====== DETECT BOT ADDED TO GROUP ======
+# ====== BOT DITAMBAHKAN KE GRUP ======
 async def handle_bot_added(update: ChatMemberUpdated, context: ContextTypes.DEFAULT_TYPE):
     if update.my_chat_member.new_chat_member.status in ['member', 'administrator']:
         chat = update.chat
@@ -102,8 +102,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("Limit pertanyaan untuk grup ini sudah habis 🚫")
             return
 
-        # Trigger browsing jika mengandung kata kunci waktu
-        browsing_needed = any(keyword in question.lower() for keyword in ["hari ini", "terbaru", "2025", "minggu ini", "kenapa", "harga bitcoin"])
+        browsing_needed = any(kw in question.lower() for kw in [
+            "hari ini", "minggu ini", "kenapa", "harga bitcoin", "berita", "terkini", "2025"
+        ])
         browsing_context = search_serper(question) if browsing_needed else None
 
         try:
@@ -111,14 +112,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 {
                     "role": "system",
                     "content": (
-                        "Kamu adalah asisten kripto Indonesia dari Coinvestasi. Gunakan gaya bahasa yang santai, tidak menjanjikan keuntungan, dan edukatif."
-                        " Jawab dengan pendek, relevan, dan tidak keluar topik seputar kripto dan Web3."
+                        "Kamu adalah asisten kripto Indonesia dari Coinvestasi. "
+                        "Gunakan gaya bahasa yang santai, tidak menjanjikan keuntungan, dan edukatif. "
+                        "Jawab secara singkat, relevan, dan tetap di topik kripto dan Web3."
                     )
                 }
             ]
 
-            if browsing_context:
-                messages.append({"role": "system", "content": f"Berikut hasil pencarian web terkini:\n{browsing_context}"})
+            if browsing_needed and browsing_context:
+                messages.append({"role": "system", "content": f"Hasil pencarian terkini:\n{browsing_context}"})
+
+            elif browsing_needed and not browsing_context:
+                fallback_note = (
+                    "❗ Saat ini aku nggak bisa akses data real-time. Tapi untuk topik seperti ini, kamu bisa cek situs seperti CoinGecko, CoinMarketCap, atau CryptoPanic.\n\n"
+                    "Kalau kamu mau, aku bantu jawab berdasarkan pemahaman umum ya."
+                )
+                await message.reply_text(fallback_note)
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "Data pencarian tidak tersedia, jawab dengan pengetahuan umum yang relevan dan edukatif."
+                    )
+                })
 
             messages.append({"role": "user", "content": question})
 
@@ -138,7 +153,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.exception("Terjadi error saat memanggil OpenAI API:")
             await message.reply_text("Lagi error, coba lagi nanti ya! 😓")
 
-# ====== MAIN ======
+# ====== MAIN FUNCTION ======
 def main():
     logger.info("Starting bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
