@@ -65,6 +65,7 @@ async def clear_idle_memory():
 def format_price(value: float) -> str:
     return f"${value:,.8f}" if value < 1 else f"${value:,.0f}"
 
+# ====== SERPER SEARCH ======
 def search_serper(query):
     try:
         res = requests.post(
@@ -79,6 +80,7 @@ def search_serper(query):
         logger.warning(f"Serper error: {e}")
         return None
 
+# ====== DATA FETCH & ANALISA ======
 def get_daily_data(symbol="bitcoin", days=30):
     url = f"https://api.coingecko.com/api/v3/coins/{symbol}/market_chart?vs_currency=usd&days={days}"
     r = requests.get(url)
@@ -119,7 +121,7 @@ def analyze_advanced(df):
         if ema9 < ema21 else f"📈 EMA Trend: EMA9 ({format_price(ema9)}) > EMA21 ({format_price(ema21)}) → Bullish"
     rsi_line = f"💠 RSI: {rsi:.1f} → {'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Netral'}"
     vol_line = f"📊 Volume: {vol_ratio:.2f}x dari rata-rata → {'Spike' if vol_ratio > 1.5 else 'Normal'}"
-    breakout_prob = "🔎 70%+ peluang breakout jika close di atas resistance"
+    breakout_prob = f"🔎 {round(min(max((vol_ratio - 1) * 100, 20), 80)):.0f}% peluang breakout jika close di atas resistance"
     candle_note = "📝 Inside Bar terdeteksi → potensi tekanan beli" if inside_bar else "➖ Tidak ada pola candle signifikan"
 
     support = df["low"].rolling(5).min().iloc[-1]
@@ -130,16 +132,28 @@ def analyze_advanced(df):
     tp1 = format_price(resistance * 1.03)
     tp2 = format_price(resistance * 1.05)
     tp = f"🎯 TP1: {tp1}, TP2: {tp2}"
-    alasan = "📌 Alasan: Kombinasi EMA uptrend, RSI moderat, volume spike, dan pola candle mendukung"
+    alasan = "📌 Alasan: Kombinasi EMA, RSI, volume, dan pola candle mendukung"
 
     return price, trend, rsi_line, vol_line, breakout_prob, candle_note, entry, sl, tp, alasan
 
+# ====== SYMBOL MAP DYNAMIC ======
 def fetch_symbol_map():
     try:
         res = requests.get("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100")
         data = res.json()
         return {f"{item['symbol'].upper()}USDT": item['id'] for item in data}
-    except:# ====== HANDLER ANALISA ======
+    except:
+        return {
+            "BTCUSDT": "bitcoin",
+            "ETHUSDT": "ethereum",
+            "SOLUSDT": "solana",
+            "BNBUSDT": "binancecoin",
+            "DOGEUSDT": "dogecoin"
+        }
+
+SYMBOL_MAP = fetch_symbol_map()
+
+# ====== HANDLER ANALISA ======
 async def analisa_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         args = context.args
@@ -247,27 +261,22 @@ async def handle_bot_added(update: ChatMemberUpdated, context: ContextTypes.DEFA
         if chat.type in ["group", "supergroup"]:
             logger.info(f"✅ Bot ditambahkan ke grup: {chat.title or chat.id}")
 
-# ====== MAIN ======
+# ====== MAIN FUNCTION ======
 def main():
     logger.info("🚀 Starting bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    # Schedule memory clearing job
     app.job_queue.run_repeating(lambda *_: asyncio.create_task(clear_idle_memory()), interval=60)
+
+    # Add handlers
     app.add_handler(ChatMemberHandler(handle_bot_added, chat_member_types=["my_chat_member"]))
     app.add_handler(CommandHandler("analisa", analisa_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Regex(r"^/tanya.*"), handle_message))
+
+    # Run polling
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-
-        return {
-            "BTCUSDT": "bitcoin",
-            "ETHUSDT": "ethereum",
-            "SOLUSDT": "solana",
-            "BNBUSDT": "binancecoin",
-            "DOGEUSDT": "dogecoin"
-        }
-
-SYMBOL_MAP = fetch_symbol_map()
-
