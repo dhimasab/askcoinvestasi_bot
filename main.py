@@ -63,6 +63,24 @@ def search_serper(query):
         logger.warning(f"Browsing error: {e}")
         return None
 
+# ====== TRIGGER KEYWORDS ======
+TRIGGER_KEYWORDS = [
+    "jawab pertanyaan ini", "respon dong", "jawab dong", "responin dong",
+    "tolong dijawab", "jawab ini dong", "tolong dijawab ya", "responin deh",
+    "coba dijawab", "tolong dong", "minta jawabannya", "bisa bantu jawab?",
+    "bantuin jawab ini dong", "ayo jawab", "please", "respon chat di atas",
+    "jawab pertanyaan sebelumnya", "jawab chat sebelumnya", "tanggapi dong",
+    "jawab"
+]
+
+def contains_trigger(text):
+    lower = text.lower()
+    if any(key in lower for key in TRIGGER_KEYWORDS):
+        return True
+    if lower.strip() == f"@{BOT_USERNAME_STRIPPED.lower()}":
+        return True
+    return False
+
 # ====== DETECT BOT ADDED TO GROUP ======
 async def handle_bot_added(update: ChatMemberUpdated, context: ContextTypes.DEFAULT_TYPE):
     if update.my_chat_member.new_chat_member.status in ['member', 'administrator']:
@@ -90,10 +108,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     is_command = text.startswith("/tanya")
     is_mention = BOT_USERNAME in text
-    is_reply = message.reply_to_message and message.reply_to_message.from_user.username == BOT_USERNAME_STRIPPED
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.username == BOT_USERNAME_STRIPPED
+    is_triggered = contains_trigger(text)
 
-    if is_command or is_mention or is_reply:
-        question = text.replace("/tanya", "").replace(BOT_USERNAME, "").strip()
+    if is_command or is_mention or is_reply_to_bot or (is_triggered and message.reply_to_message):
+        question = ""
+
+        if is_command or is_mention:
+            question = text.replace("/tanya", "").replace(BOT_USERNAME, "").strip()
+        elif is_reply_to_bot or (is_triggered and message.reply_to_message):
+            question = message.reply_to_message.text
 
         if not question:
             await message.reply_text("Pertanyaannya mana, bro? 😅")
