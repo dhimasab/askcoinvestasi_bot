@@ -73,7 +73,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         usage_count = usage_counter.get(group_id, 0)
         if usage_count >= 100:
             logger.info(f"Limit tercapai untuk grup: {group_name} ({group_id})")
-            await message.reply_text("Limit 100 pertanyaan untuk grup ini sudah habis 🚫")
+            await message.reply_text("Limit pertanyaan untuk grup ini sudah habis 🚫")
             return
 
         try:
