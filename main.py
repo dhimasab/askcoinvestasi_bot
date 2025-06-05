@@ -22,29 +22,40 @@ logger = logging.getLogger(__name__)
 # ====== ENV VARS ======
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 BOT_USERNAME = "@askcoinvestasi_bot"
 BOT_USERNAME_STRIPPED = BOT_USERNAME.replace("@", "")
-SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# ====== ALLOWED GROUPS ======
-with open("allowed_groups.json") as f:
-    ALLOWED_GROUPS = json.load(f)
-
+# ====== FILES ======
 USAGE_FILE = "group_usage.json"
+MEMORY_FILE = "memory.json"
 
-def load_usage():
-    if os.path.exists(USAGE_FILE):
-        with open(USAGE_FILE) as f:
+def load_json(path):
+    if os.path.exists(path):
+        with open(path) as f:
             return json.load(f)
     return {}
 
-def save_usage(data):
-    with open(USAGE_FILE, "w") as f:
+def save_json(data, path):
+    with open(path, "w") as f:
         json.dump(data, f)
 
-usage_counter = load_usage()
+usage_counter = load_json(USAGE_FILE)
+conversation_memory = load_json(MEMORY_FILE)
+
+with open("allowed_groups.json") as f:
+    ALLOWED_GROUPS = json.load(f)
+
+TRIGGER_KEYWORDS = [
+    "jawab pertanyaan ini", "respon dong", "jawab dong", "responin dong",
+    "tolong dijawab", "jawab ini dong", "tolong dijawab ya", "responin deh",
+    "coba dijawab", "tolong dong", "minta jawabannya", "bisa bantu jawab?",
+    "bantuin jawab ini dong", "ayo jawab", "please", "respon chat di atas",
+    "jawab pertanyaan sebelumnya", "jawab chat sebelumnya", "tanggapi dong",
+    "jawab"
+]
 
 # ====== BROWSING FUNCTION ======
 def search_serper(query):
@@ -63,21 +74,19 @@ def search_serper(query):
         logger.warning(f"Browsing error: {e}")
         return None
 
-# ====== DETECT BOT ADDED TO GROUP ======
+# ====== HANDLE BOT ADDED ======
 async def handle_bot_added(update: ChatMemberUpdated, context: ContextTypes.DEFAULT_TYPE):
     if update.my_chat_member.new_chat_member.status in ['member', 'administrator']:
         chat = update.chat
         if chat.type in ["group", "supergroup"]:
             logger.info(f"✅ Bot ditambahkan ke grup baru: {chat.title or 'Unknown'} (ID: {chat.id})")
 
-# ====== MESSAGE HANDLER ======
+# ====== MAIN HANDLER ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     text = message.text
     chat = update.effective_chat
-
-    if not text:
-        return
+    if not text: return
 
     group_id = str(chat.id)
     group_name = chat.title if chat.type in ["group", "supergroup"] else "Private Chat"
@@ -90,76 +99,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     is_command = text.startswith("/tanya")
     is_mention = BOT_USERNAME in text
+    is_trigger_phrase = any(kw in text.lower() for kw in TRIGGER_KEYWORDS)
     is_reply = message.reply_to_message and message.reply_to_message.from_user.username == BOT_USERNAME_STRIPPED
+    should_respond = is_command or is_mention or (is_reply and is_trigger_phrase) or (is_reply and BOT_USERNAME in text)
 
-    if is_command or is_mention or is_reply:
-        question = text.replace("/tanya", "").replace(BOT_USERNAME, "").strip()
+    if not should_respond:
+        return
 
-        if not question:
-            await message.reply_text("Pertanyaannya mana, bro? 😅")
-            return
+    # Extract question or fallback to memory
+    question = text.replace("/tanya", "").replace(BOT_USERNAME, "").strip()
+    if not question and group_id in conversation_memory:
+        question = conversation_memory[group_id]
+    elif not question:
+        await message.reply_text("Pertanyaannya mana, bro? 😅")
+        return
 
-        logger.info(f"Question parsed: {question}")
-        usage_count = usage_counter.get(group_id, 0)
+    conversation_memory[group_id] = question
+    save_json(conversation_memory, MEMORY_FILE)
 
-        if usage_count >= 100:
-            logger.info(f"⛔ Limit tercapai untuk grup: {group_name} ({group_id})")
-            await message.reply_text("Limit pertanyaan untuk grup ini sudah habis 🚫")
-            return
+    if usage_counter.get(group_id, 0) >= 100:
+        logger.info(f"⛔ Limit tercapai untuk grup: {group_name} ({group_id})")
+        await message.reply_text("Limit pertanyaan untuk grup ini sudah habis 🚫")
+        return
 
-        browsing_needed = any(keyword in question.lower() for keyword in ["hari ini", "terbaru", "2025", "minggu ini", "kenapa", "harga", "pump", "crash"])
-        browsing_context = search_serper(question) if browsing_needed else None
+    browsing_needed = any(kw in question.lower() for kw in ["hari ini", "terbaru", "2025", "minggu ini", "kenapa", "harga", "pump", "crash"])
+    browsing_context = search_serper(question) if browsing_needed else None
 
-        try:
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "Kamu adalah asisten kripto Indonesia dari Coinvestasi. Gunakan gaya bahasa yang santai, tidak menjanjikan keuntungan, dan edukatif. "
-                        "Jawab pendek, relevan, dan fokus ke topik kripto & Web3. Jika user menanyakan info umum atau data waktu nyata, prioritaskan hasil pencarian web."
-                    )
-                }
-            ]
+    try:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Kamu adalah asisten kripto Indonesia dari Coinvestasi. Gunakan gaya bahasa yang santai, tidak menjanjikan keuntungan, dan edukatif. "
+                    "Jawab pendek, relevan, dan fokus ke topik kripto & Web3. Jika user menanyakan info umum atau data waktu nyata, prioritaskan hasil pencarian web."
+                )
+            }
+        ]
+        if browsing_context:
+            messages.append({"role": "system", "content": f"Berikut hasil pencarian web:\n{browsing_context}"})
+        elif browsing_needed and not browsing_context:
+            messages.append({"role": "system", "content": "Hasil pencarian web tidak tersedia. Jawab sebisanya dengan pengetahuan umum."})
 
-            if browsing_needed and browsing_context:
-                messages.append({
-                    "role": "system",
-                    "content": f"Berikut hasil pencarian web terkini:\n{browsing_context}"
-                })
-            elif browsing_needed and not browsing_context:
-                messages.append({
-                    "role": "system",
-                    "content": "Tidak ada hasil pencarian web tersedia, jawab dengan info umum yang masuk akal."
-                })
+        messages.append({"role": "user", "content": question})
 
-            messages.append({"role": "user", "content": question})
+        response = client.chat.completions.create(model="gpt-4o", messages=messages)
+        answer = response.choices[0].message.content.strip()
 
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=messages
-            )
+        logger.info(f"OpenAI response: {answer}")
+        await message.reply_text(answer, reply_to_message_id=message.message_id)
 
-            answer = response.choices[0].message.content.strip()
-            logger.info(f"OpenAI response: {answer}")
-            await message.reply_text(answer, reply_to_message_id=message.message_id)
+        usage_counter[group_id] = usage_counter.get(group_id, 0) + 1
+        save_json(usage_counter, USAGE_FILE)
 
-            usage_counter[group_id] = usage_count + 1
-            save_usage(usage_counter)
-
-        except Exception as e:
-            logger.exception("Terjadi error saat memanggil OpenAI API:")
-            await message.reply_text("Lagi error, coba lagi nanti ya! 😓")
+    except Exception as e:
+        logger.exception("Terjadi error saat memanggil OpenAI API:")
+        await message.reply_text("Lagi error, coba lagi nanti ya! 😓")
 
 # ====== MAIN ======
 def main():
     logger.info("Starting bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
     app.add_handler(ChatMemberHandler(handle_bot_added, chat_member_types=["my_chat_member"]))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Regex(r"^/tanya.*"), handle_message))
-
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+
