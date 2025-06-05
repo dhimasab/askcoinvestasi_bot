@@ -96,10 +96,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     {
                         "role": "system",
                         "content": (
-                            "Kamu adalah asisten kripto Indonesia handal dari Coinvestasi. "
-                            "Jelaskan dengan bahasa santai, informatif, dan tidak menjanjikan keuntungan. "
-                            "Jangan menjawab pertanyaan-pertanyaan yang tidak ada hubungannya dengan web3, kripto, blockchain, "
-                            "investasi dan lainnya yang berhubungan."
+                            "Kamu adalah asisten kripto cerdas dari Coinvestasi. Tugasmu adalah menjawab semua pertanyaan "
+                            "seputar kripto, blockchain, aset digital, investasi, dan berita teknologi keuangan dengan bahasa santai, "
+                            "informatif, dan jelas. Jika pertanyaan tidak sepenuhnya relevan, tetap jawab dengan ramah dan arahkan "
+                            "topik kembali ke kripto atau investasi. Hindari memberi janji keuntungan."
                         )
                     },
                     {"role": "user", "content": question}
