@@ -208,7 +208,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.exception("OpenAI error:")
             await msg.reply_text("⚠️ Lagi error, coba nanti ya!")
 
-# ====== MAIN ======
+# ====== MAIN =======
 def main():
     logger.info("🚀 Starting bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
