@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 BOT_USERNAME = "@askcoinvestasi_bot"
-SERPER_API_KEY = os.getenv("SERPER_API_KEY") or "8e28cf714810f94847d29700c9e3be11c2d1186d"
+BOT_USERNAME_STRIPPED = BOT_USERNAME.replace("@", "")
+SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
@@ -62,7 +63,7 @@ def search_serper(query):
         logger.warning(f"Browsing error: {e}")
         return None
 
-# ====== BOT DITAMBAHKAN KE GRUP ======
+# ====== DETECT BOT ADDED TO GROUP ======
 async def handle_bot_added(update: ChatMemberUpdated, context: ContextTypes.DEFAULT_TYPE):
     if update.my_chat_member.new_chat_member.status in ['member', 'administrator']:
         chat = update.chat
@@ -87,7 +88,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("Bot ini belum diaktifkan untuk grup ini 🚫")
         return
 
-    if text.startswith("/tanya") or BOT_USERNAME in text:
+    is_command = text.startswith("/tanya")
+    is_mention = BOT_USERNAME in text
+    is_reply = message.reply_to_message and message.reply_to_message.from_user.username == BOT_USERNAME_STRIPPED
+
+    if is_command or is_mention or is_reply:
         question = text.replace("/tanya", "").replace(BOT_USERNAME, "").strip()
 
         if not question:
@@ -102,9 +107,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("Limit pertanyaan untuk grup ini sudah habis 🚫")
             return
 
-        browsing_needed = any(kw in question.lower() for kw in [
-            "hari ini", "minggu ini", "kenapa", "harga bitcoin", "berita", "terkini", "2025"
-        ])
+        browsing_needed = any(keyword in question.lower() for keyword in ["hari ini", "terbaru", "2025", "minggu ini", "kenapa", "harga", "pump", "crash"])
         browsing_context = search_serper(question) if browsing_needed else None
 
         try:
@@ -112,27 +115,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 {
                     "role": "system",
                     "content": (
-                        "Kamu adalah asisten kripto Indonesia dari Coinvestasi. "
-                        "Gunakan gaya bahasa yang santai, tidak menjanjikan keuntungan, dan edukatif. "
-                        "Jawab secara singkat, relevan, dan tetap di topik kripto dan Web3."
+                        "Kamu adalah asisten kripto Indonesia dari Coinvestasi. Gunakan gaya bahasa yang santai, tidak menjanjikan keuntungan, dan edukatif. "
+                        "Jawab pendek, relevan, dan fokus ke topik kripto & Web3. Jika user menanyakan info umum atau data waktu nyata, prioritaskan hasil pencarian web."
                     )
                 }
             ]
 
             if browsing_needed and browsing_context:
-                messages.append({"role": "system", "content": f"Hasil pencarian terkini:\n{browsing_context}"})
-
-            elif browsing_needed and not browsing_context:
-                fallback_note = (
-                    "❗ Saat ini aku nggak bisa akses data real-time. Tapi untuk topik seperti ini, kamu bisa cek situs seperti CoinGecko, CoinMarketCap, atau CryptoPanic.\n\n"
-                    "Kalau kamu mau, aku bantu jawab berdasarkan pemahaman umum ya."
-                )
-                await message.reply_text(fallback_note)
                 messages.append({
                     "role": "system",
-                    "content": (
-                        "Data pencarian tidak tersedia, jawab dengan pengetahuan umum yang relevan dan edukatif."
-                    )
+                    "content": f"Berikut hasil pencarian web terkini:\n{browsing_context}"
+                })
+            elif browsing_needed and not browsing_context:
+                messages.append({
+                    "role": "system",
+                    "content": "Tidak ada hasil pencarian web tersedia, jawab dengan info umum yang masuk akal."
                 })
 
             messages.append({"role": "user", "content": question})
@@ -153,7 +150,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.exception("Terjadi error saat memanggil OpenAI API:")
             await message.reply_text("Lagi error, coba lagi nanti ya! 😓")
 
-# ====== MAIN FUNCTION ======
+# ====== MAIN ======
 def main():
     logger.info("Starting bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
