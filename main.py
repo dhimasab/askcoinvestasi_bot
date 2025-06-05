@@ -83,14 +83,22 @@ def search_serper(query):
 # ====== BINANCE ANALYTICS ======
 def get_binance_ohlcv(symbol="BTCUSDT", interval="1h", limit=100):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    r = requests.get(url)
-    df = pd.DataFrame(r.json(), columns=[
-        "time", "open", "high", "low", "close", "volume",
-        "close_time", "quote", "trades", "taker_buy_base", "taker_buy_quote", "ignore"
-    ])
-    df["close"] = df["close"].astype(float)
-    df["volume"] = df["volume"].astype(float)
-    return df
+    try:
+        res = requests.get(url, timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        if not isinstance(data, list) or len(data) < 30:
+            raise ValueError("Data tidak cukup atau format salah.")
+        df = pd.DataFrame(data, columns=[
+            "time", "open", "high", "low", "close", "volume",
+            "close_time", "quote", "trades", "taker_buy_base", "taker_buy_quote", "ignore"
+        ])
+        df["close"] = df["close"].astype(float)
+        df["volume"] = df["volume"].astype(float)
+        return df
+    except Exception as e:
+        logger.warning(f"❌ Gagal ambil data Binance {symbol}-{interval}: {e}")
+        return None
 
 def analyze(df):
     df["EMA9"] = df["close"].ewm(span=9).mean()
@@ -122,6 +130,9 @@ async def analisa_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         symbol, tf = args[0].upper(), args[1]
         df = get_binance_ohlcv(symbol, tf)
+        if df is None:
+            await update.message.reply_text("⚠️ Analisa gagal. Coba pair & timeframe lain ya.")
+            return
         trend, rsi, vol, confirm = analyze(df)
         msg = f"📊 Analisa {symbol} ({tf})\n\n{trend}\n{rsi}\n{vol}\n\n{confirm}"
         await update.message.reply_text(msg, reply_to_message_id=update.message.message_id)
