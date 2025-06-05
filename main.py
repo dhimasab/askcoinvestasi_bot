@@ -22,9 +22,18 @@ client = openai.OpenAI(api_key=OPENAI_API_KEY)
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     text = message.text
+    chat = update.effective_chat
 
     if not text:
         return
+
+    # Log ID & Nama grup untuk identifikasi
+    if chat.type in ["group", "supergroup"]:
+        group_id = str(chat.id)
+        group_name = chat.title
+        logger.info(f"Pesan masuk dari grup: {group_name} (ID: {group_id})")
+    else:
+        logger.info(f"Pesan masuk dari user pribadi: {chat.username or chat.id}")
 
     logger.info(f"Received message: {text}")
 
