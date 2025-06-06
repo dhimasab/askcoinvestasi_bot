@@ -1,3 +1,4 @@
+# ====== IMPORT & SETUP ======
 import os
 import json
 import logging
@@ -80,7 +81,7 @@ def search_serper(query):
         logger.warning(f"Serper error: {e}")
         return None
 
-# ====== SYMBOL MAP STATIC (50 pair) ======
+# ====== SYMBOL MAP STATIC ======
 SYMBOL_MAP = {
     "BTCUSDT": "bitcoin",
     "ETHUSDT": "ethereum",
@@ -120,17 +121,7 @@ SYMBOL_MAP = {
     "RNDRUSDT": "render-token",
     "FLOWUSDT": "flow",
     "CAKEUSDT": "pancakeswap-token",
-    "FXSUSDT": "frax-share",
-    "GMXUSDT": "gmx",
-    "RPLUSDT": "rocket-pool",
-    "DYDXUSDT": "dydx",
-    "LDOUSDT": "lido-dao",
-    "BATUSDT": "basic-attention-token",
-    "1INCHUSDT": "1inch",
-    "ENSUSDT": "ethereum-name-service",
-    "COMPUSDT": "compound-governance-token",
-    "ZRXUSDT": "0x",
-    "ANKRUSDT": "ankr"
+    "DYDXUSDT": "dydx"
 }
 
 # ====== DATA FETCH & ANALYZE ======
@@ -143,18 +134,14 @@ def get_daily_data(symbol="bitcoin", days=30):
     df = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
     df["close"] = df["close"].astype(float)
     df["volume"] = [v[1] for v in data["total_volumes"]]
-
-    # Ini bagian penting → pakai min_periods=1 biar ga NaN
     df["high"] = df["close"].rolling(2, min_periods=1).max()
     df["low"] = df["close"].rolling(2, min_periods=1).min()
     df["open"] = df["close"].shift(1)
-
     return df
 
 def analyze_advanced(df):
     df["EMA9"] = df["close"].ewm(span=9).mean()
     df["EMA21"] = df["close"].ewm(span=21).mean()
-
     delta = df["close"].diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
@@ -162,51 +149,40 @@ def analyze_advanced(df):
     avg_loss = loss.rolling(14).mean()
     rs = avg_gain / avg_loss
     df["RSI"] = 100 - (100 / (1 + rs))
-
     df["vol_mean"] = df["volume"].rolling(20).mean()
     df["vol_std"] = df["volume"].rolling(20).std()
     df["vol_z"] = (df["volume"] - df["vol_mean"]) / df["vol_std"]
-
     df["H-L"] = df["high"] - df["low"]
     df["H-PC"] = abs(df["high"] - df["close"].shift(1))
     df["L-PC"] = abs(df["low"] - df["close"].shift(1))
     df["TR"] = df[["H-L", "H-PC", "L-PC"]].max(axis=1)
     df["ATR"] = df["TR"].rolling(14).mean()
-
-    # Ini juga penting → pakai format_price langsung
     support = format_price(df["low"].rolling(5).min().iloc[-1])
     resistance = format_price(df["high"].rolling(5).max().iloc[-1])
-
     last = df.iloc[-1]
     prev = df.iloc[-2]
-
     price = last["close"]
     ema9, ema21 = last["EMA9"], last["EMA21"]
     rsi = last["RSI"]
     vol_z = last["vol_z"]
     atr = last["ATR"]
     inside_bar = last["close"] < prev["high"] and last["close"] > prev["low"]
-
-    trend = f"EMA Trend: EMA9 ({format_price(ema9)}) vs EMA21 ({format_price(ema21)})"
-    rsi_line = f"RSI: {rsi:.1f}"
-    vol_line = f"Volume Z-score: {vol_z:.2f}"
-
+    trend = f"EMA Trend: EMA9 ({format_price(ema9)}) < EMA21 ({format_price(ema21)}) → Bearish" \
+        if ema9 < ema21 else f"EMA Trend: EMA9 ({format_price(ema9)}) > EMA21 ({format_price(ema21)}) → Bullish"
+    rsi_line = f"💠 RSI: {rsi:.1f} → {'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Netral'}"
+    vol_line = f"📊 Volume: {vol_z:.2f}x dari rata-rata → {'Spike' if abs(vol_z) > 1.5 else 'Normal'}"
     proximity = max(0, 1 - abs(float(resistance.replace('$','').replace(',','')) - price) / float(resistance.replace('$','').replace(',','')))
     breakout_raw = (proximity * 1.5 + max(vol_z, 0) * 0.5)
     breakout_prob = 1 / (1 + np.exp(-breakout_raw))
     breakout_pct = int(breakout_prob * 100)
     breakout_line = f"{breakout_pct}% peluang breakout jika close di atas resistance"
-
     candle_note = "Inside Bar terdeteksi" if inside_bar else "Tidak ada pola candle signifikan"
-
     entry = f"Entry Buy: {format_price(price)} jika close valid"
     sl = f"Stop Loss: {support}"
     tp1 = format_price(float(resistance.replace('$','').replace(',','')) + 1.0 * atr)
     tp2 = format_price(float(resistance.replace('$','').replace(',','')) + 1.5 * atr)
     tp = f"TP1: {tp1}, TP2: {tp2}"
-
     alasan = "Alasan: Kombinasi EMA, RSI, volume, ATR, dan pola candle mendukung"
-
     return price, trend, rsi_line, vol_line, breakout_line, candle_note, entry, sl, tp, alasan, support, resistance
 
 # ====== HANDLER ANALISA ======
