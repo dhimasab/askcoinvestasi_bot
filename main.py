@@ -1,3 +1,5 @@
+# [FULLSCRIPT FINAL REVISI]
+
 import os
 import json
 import logging
@@ -98,6 +100,7 @@ def get_daily_data(symbol="bitcoin", days=30):
 def analyze_advanced(df):
     df["EMA9"] = df["close"].ewm(span=9).mean()
     df["EMA21"] = df["close"].ewm(span=21).mean()
+
     delta = df["close"].diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
@@ -105,8 +108,19 @@ def analyze_advanced(df):
     avg_loss = loss.rolling(14).mean()
     rs = avg_gain / avg_loss
     df["RSI"] = 100 - (100 / (1 + rs))
-    df["vol_avg"] = df["volume"].rolling(20).mean()
-    df["vol_spike"] = df["volume"] > 1.5 * df["vol_avg"]
+
+    df["vol_mean"] = df["volume"].rolling(20).mean()
+    df["vol_std"] = df["volume"].rolling(20).std()
+    df["vol_z"] = (df["volume"] - df["vol_mean"]) / df["vol_std"]
+
+    df["H-L"] = df["high"] - df["low"]
+    df["H-PC"] = abs(df["high"] - df["close"].shift(1))
+    df["L-PC"] = abs(df["low"] - df["close"].shift(1))
+    df["TR"] = df[["H-L", "H-PC", "L-PC"]].max(axis=1)
+    df["ATR"] = df["TR"].rolling(14).mean()
+
+    support = df["low"].rolling(5).min().iloc[-1]
+    resistance = df["high"].rolling(5).max().iloc[-1]
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -114,27 +128,32 @@ def analyze_advanced(df):
     price = last["close"]
     ema9, ema21 = last["EMA9"], last["EMA21"]
     rsi = last["RSI"]
-    vol_ratio = last["volume"] / last["vol_avg"]
+    vol_z = last["vol_z"]
+    atr = last["ATR"]
     inside_bar = last["close"] < prev["high"] and last["close"] > prev["low"]
 
     trend = f"📉 EMA Trend: EMA9 ({format_price(ema9)}) < EMA21 ({format_price(ema21)}) → Bearish" \
         if ema9 < ema21 else f"📈 EMA Trend: EMA9 ({format_price(ema9)}) > EMA21 ({format_price(ema21)}) → Bullish"
-    rsi_line = f"💠 RSI: {rsi:.1f} → {'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Netral'}"
-    vol_line = f"📊 Volume: {vol_ratio:.2f}x dari rata-rata → {'Spike' if vol_ratio > 1.5 else 'Normal'}"
-    breakout_prob = f"🔎 {round(min(max((vol_ratio - 1) * 100, 20), 80)):.0f}% peluang breakout jika close di atas resistance"
-    candle_note = "📝 Inside Bar terdeteksi → potensi tekanan beli" if inside_bar else "➖ Tidak ada pola candle signifikan"
 
-    support = df["low"].rolling(5).min().iloc[-1]
-    resistance = df["high"].rolling(5).max().iloc[-1]
+    rsi_line = f"💠 RSI: {rsi:.1f} → {'Oversold' if rsi < 30 else 'Overbought' if rsi > 70 else 'Netral'}"
+    vol_line = f"📊 Volume Z-score: {vol_z:.2f} → {'Spike' if abs(vol_z) > 2 else 'Normal'}"
+
+    proximity = max(0, 1 - abs(resistance - price) / resistance)
+    breakout_raw = (proximity * 1.5 + max(vol_z, 0) * 0.5)
+    breakout_prob = 1 / (1 + np.exp(-breakout_raw))
+    breakout_pct = int(breakout_prob * 100)
+    breakout_line = f"🔎 {breakout_pct}% peluang breakout jika close di atas resistance"
+
+    candle_note = "📝 Inside Bar terdeteksi → potensi tekanan beli" if inside_bar else "➖ Tidak ada pola candle signifikan"
 
     entry = f"🎯 Entry Buy: {format_price(resistance)} jika close valid"
     sl = f"🛑 Stop Loss: {format_price(support)}"
-    tp1 = format_price(resistance * 1.03)
-    tp2 = format_price(resistance * 1.05)
+    tp1 = format_price(resistance + 1.0 * atr)
+    tp2 = format_price(resistance + 1.5 * atr)
     tp = f"🎯 TP1: {tp1}, TP2: {tp2}"
-    alasan = "📌 Alasan: Kombinasi EMA, RSI, volume, dan pola candle mendukung"
+    alasan = "📌 Alasan: Kombinasi EMA, RSI, volume, ATR, dan pola candle mendukung"
 
-    return price, trend, rsi_line, vol_line, breakout_prob, candle_note, entry, sl, tp, alasan
+    return price, trend, rsi_line, vol_line, breakout_line, candle_note, entry, sl, tp, alasan, support, resistance
 
 # ====== SYMBOL MAP DYNAMIC ======
 def fetch_symbol_map():
@@ -167,29 +186,31 @@ async def analisa_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         df = get_daily_data(cg_id)
-        price, trend, rsi, vol, breakout, candle, entry, sl, tp, alasan = analyze_advanced(df)
+        price, trend, rsi, vol, breakout, candle, entry, sl, tp, alasan, support, resistance = analyze_advanced(df)
         msg = f"""
 🌟 *Analisa {symbol} (1D)*
 Data: {datetime.utcnow().date()}
 
 ⬆️ Harga sekarang: {format_price(price)}
 
-1. *Trend & Indikator:*
-{trend}
-{rsi}
-{vol}
+1. *Trend & Indikator:*  
+{trend}  
+{rsi}  
+{vol}  
 
-2. *Breakout Probability:*  
-{breakout}
+2. *Support & Resistance + Breakout Probability:*  
+🔹 Support: {format_price(support)}  
+🔹 Resistance: {format_price(resistance)}  
+{breakout}  
 
 3. *Candle Pattern:*  
-{candle}
+{candle}  
 
 4. *Trading Plan:*  
 {entry}  
 {sl}  
 {tp}  
-{alasan}
+{alasan}  
 
 5. *Rekomendasi:*  
 🍛 Tunggu konfirmasi close daily sebelum entry. Hindari FOMO.
@@ -266,16 +287,13 @@ def main():
     logger.info("🚀 Starting bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    # Schedule memory clearing job
     app.job_queue.run_repeating(lambda *_: asyncio.create_task(clear_idle_memory()), interval=60)
 
-    # Add handlers
     app.add_handler(ChatMemberHandler(handle_bot_added, chat_member_types=["my_chat_member"]))
     app.add_handler(CommandHandler("analisa", analisa_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Regex(r"^/tanya.*"), handle_message))
 
-    # Run polling
     app.run_polling()
 
 if __name__ == "__main__":
