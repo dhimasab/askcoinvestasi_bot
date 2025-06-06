@@ -143,9 +143,12 @@ def get_daily_data(symbol="bitcoin", days=30):
     df = pd.DataFrame(data["prices"], columns=["timestamp", "close"])
     df["close"] = df["close"].astype(float)
     df["volume"] = [v[1] for v in data["total_volumes"]]
-    df["high"] = df["close"].rolling(2).max()
-    df["low"] = df["close"].rolling(2).min()
+
+    # Ini bagian penting → pakai min_periods=1 biar ga NaN
+    df["high"] = df["close"].rolling(2, min_periods=1).max()
+    df["low"] = df["close"].rolling(2, min_periods=1).min()
     df["open"] = df["close"].shift(1)
+
     return df
 
 def analyze_advanced(df):
@@ -170,8 +173,9 @@ def analyze_advanced(df):
     df["TR"] = df[["H-L", "H-PC", "L-PC"]].max(axis=1)
     df["ATR"] = df["TR"].rolling(14).mean()
 
-    support = df["low"].rolling(5).min().iloc[-1]
-    resistance = df["high"].rolling(5).max().iloc[-1]
+    # Ini juga penting → pakai format_price langsung
+    support = format_price(df["low"].rolling(5).min().iloc[-1])
+    resistance = format_price(df["high"].rolling(5).max().iloc[-1])
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -187,7 +191,7 @@ def analyze_advanced(df):
     rsi_line = f"RSI: {rsi:.1f}"
     vol_line = f"Volume Z-score: {vol_z:.2f}"
 
-    proximity = max(0, 1 - abs(resistance - price) / resistance)
+    proximity = max(0, 1 - abs(float(resistance.replace('$','').replace(',','')) - price) / float(resistance.replace('$','').replace(',','')))
     breakout_raw = (proximity * 1.5 + max(vol_z, 0) * 0.5)
     breakout_prob = 1 / (1 + np.exp(-breakout_raw))
     breakout_pct = int(breakout_prob * 100)
@@ -195,10 +199,10 @@ def analyze_advanced(df):
 
     candle_note = "Inside Bar terdeteksi" if inside_bar else "Tidak ada pola candle signifikan"
 
-    entry = f"Entry Buy: {format_price(resistance)} jika close valid"
-    sl = f"Stop Loss: {format_price(support)}"
-    tp1 = format_price(resistance + 1.0 * atr)
-    tp2 = format_price(resistance + 1.5 * atr)
+    entry = f"Entry Buy: {format_price(price)} jika close valid"
+    sl = f"Stop Loss: {support}"
+    tp1 = format_price(float(resistance.replace('$','').replace(',','')) + 1.0 * atr)
+    tp2 = format_price(float(resistance.replace('$','').replace(',','')) + 1.5 * atr)
     tp = f"TP1: {tp1}, TP2: {tp2}"
 
     alasan = "Alasan: Kombinasi EMA, RSI, volume, ATR, dan pola candle mendukung"
@@ -228,23 +232,23 @@ Data: {datetime.utcnow().date()}
 ⬆️ Harga sekarang: {format_price(price)}
 
 1. *Trend & Indikator:*  
-{trend}  
-{rsi}  
-{vol}  
+📉 {trend}  
+💠 {rsi}  
+📊 {vol}  
 
 2. *Support & Resistance + Breakout Probability:*  
 🔹 Support: {support}  
 🔹 Resistance: {resistance}  
-{breakout}  
+🔎 {breakout}  
 
 3. *Candle Pattern:*  
-{candle}  
+📝 {candle}  
 
 4. *Trading Plan:*  
-{entry}  
-{sl}  
-{tp}  
-{alasan}  
+🎯 {entry}  
+🛑 {sl}  
+🎯 {tp}  
+📌 {alasan}  
 
 5. *Rekomendasi:*  
 🍛 Tunggu konfirmasi close daily sebelum entry. Hindari FOMO.
